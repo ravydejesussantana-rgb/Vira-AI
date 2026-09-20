@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ViraAI — Crie sua foto</title>
+<style>
+  :root {
+    --bg: #05070a;
+    --card: #10140f;
+    --card-border: #262b23;
+    --card-border-hover: #3a4132;
+    --accent: #c6f135;
+    --accent-dim: #1c2415;
+    --text: #f5f6f2;
+    --text-dim: #9aa196;
+    --danger: #ff6b6b;
+    --cyan: #6ee7d8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 0 0 60px;
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  header.topo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--card-border);
+  }
+  .logo-badge {
+    width: 30px; height: 30px; border-radius: 8px;
+    background: var(--accent);
+    color: #0a0d09;
+    font-weight: 800;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+  header.topo .brand { font-size: 16px; font-weight: 800; letter-spacing: 0.2px; }
+  header.topo .brand span { color: var(--accent); }
+  header.topo .sub { font-size: 12px; color: var(--text-dim); margin-top: 1px; }
+
+  /* --- indicador de passos --- */
+  .passos {
+    display: flex;
+    justify-content: space-between;
+    padding: 20px 16px 8px;
+    border-bottom: 1px solid var(--card-border);
+  }
+  .passo { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; }
+  .passo .bolha {
+    width: 30px; height: 30px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700;
+    background: #1a1e17; color: var(--text-dim);
+    border: 1px solid var(--card-border);
+  }
+  .passo.ativo .bolha { background: var(--accent); color: #0a0d09; border-color: var(--accent); }
+  .passo.feito .bolha { background: var(--accent); color: #0a0d09; border-color: var(--accent); }
+  .passo .rotulo { font-size: 10px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-dim); }
+  .passo.ativo .rotulo { color: var(--text); font-weight: 700; }
+
+  main { padding: 20px 20px 0; }
+  .tela { display: none; }
+  .tela.ativa { display: block; }
+
+  h1 { font-size: 22px; line-height: 1.25; margin: 0 0 8px; font-weight: 800; }
+  p.sub { color: var(--text-dim); margin: 0 0 22px; font-size: 14px; line-height: 1.5; }
+
+  section.bloco { margin-bottom: 26px; }
+  section.bloco > .titulo { display: block; font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+
+  /* upload de foto */
+  .dropzone {
+    border: 1.5px dashed var(--card-border);
+    border-radius: 14px;
+    background: var(--card);
+    padding: 34px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+    display: block;
+  }
+  .dropzone:hover { border-color: var(--accent); }
+  .dropzone.tem-arquivo { border-style: solid; border-color: var(--accent); }
+  .dropzone .icone { font-size: 26px; margin-bottom: 10px; }
+  .dropzone .principal { font-weight: 600; font-size: 14px; }
+  .dropzone .secundario { color: var(--text-dim); font-size: 12px; margin-top: 4px; }
+  .dropzone input[type="file"] { display: none; }
+  .preview-foto { margin-top: 14px; max-width: 160px; border-radius: 10px; display: none; }
+
+  /* grid de cards (categoria, roupa, cenário, pose etc) */
+  .grid-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .card-opcao {
+    border: 1.5px solid var(--card-border);
+    background: var(--card);
+    border-radius: 12px;
+    padding: 16px 14px;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    position: relative;
+    transition: border-color 0.15s ease, background 0.15s ease;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card-opcao .emoji { font-size: 17px; }
+  .card-opcao:hover { border-color: var(--card-border-hover); }
+  .card-opcao.selecionada { border-color: var(--accent); background: var(--accent-dim); }
+  .card-opcao .check { position: absolute; top: 10px; right: 10px; color: var(--accent); font-weight: 800; display: none; font-size: 13px; }
+  .card-opcao.selecionada .check { display: inline; }
+
+  textarea {
+    width: 100%; min-height: 90px; padding: 14px; border-radius: 12px;
+    border: 1.5px solid var(--card-border); background: var(--card); color: var(--text);
+    font-size: 14px; font-family: inherit; resize: vertical;
+  }
+  textarea::placeholder { color: var(--text-dim); }
+  textarea:focus, .dropzone:focus-within { outline: none; border-color: var(--accent); }
+
+  .aviso { font-size: 12px; color: var(--text-dim); margin-top: 10px; line-height: 1.5; }
+  .tag-secao { font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--cyan); margin-bottom: 10px; display: block; }
+
+  /* botões de navegação do wizard */
+  .nav-wizard { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding-bottom: 24px; }
+  .btn-voltar {
+    background: none; border: none; color: var(--text-dim); font-weight: 700; font-size: 13px;
+    text-transform: uppercase; letter-spacing: 0.4px; cursor: pointer; display: flex; align-items: center; gap: 6px;
+  }
+  .btn-continuar {
+    border: none; border-radius: 999px; background: var(--accent); color: #0a0d09;
+    font-size: 13px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase;
+    cursor: pointer; padding: 14px 26px; display: flex; align-items: center; gap: 8px;
+  }
+  .btn-continuar:disabled { opacity: 0.4; cursor: default; }
+  .btn-continuar.full { width: 100%; justify-content: center; padding: 16px; }
+
+  /* revisão (passo 4) */
+  .resumo-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 0; border-bottom: 1px solid var(--card-border);
+  }
+  .resumo-item .rotulo { font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-dim); display: block; margin-bottom: 3px; }
+  .resumo-item .valor { font-size: 14.5px; font-weight: 600; }
+  .resumo-item .editar { font-size: 11px; font-weight: 700; color: var(--accent); background: none; border: none; cursor: pointer; text-transform: uppercase; }
+
+  /* finalize (passo 5) */
+  .checklist { list-style: none; margin: 0 0 20px; padding: 0; }
+  .checklist li { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; margin-bottom: 10px; color: var(--text); }
+  .checklist li .v { color: var(--accent); font-weight: 800; }
+
+  .box-final {
+    border: 1px solid #2c3a1c; border-radius: 16px; background: var(--accent-dim); padding: 22px;
+  }
+  .box-final .titulo-box { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--text-dim); margin-bottom: 14px; }
+  .box-final .selo { border: 1px solid var(--accent); color: var(--accent); font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 999px; text-transform: uppercase; }
+
+  #status { margin-top: 16px; font-size: 13px; color: var(--text-dim); text-align: center; }
+  #erro { color: var(--danger); font-size: 13px; margin-top: 10px; text-align: center; }
+
+  #resultado { margin-top: 24px; text-align: center; }
+  #resultado img { max-width: 100%; border-radius: 14px; margin-top: 12px; border: 1.5px solid var(--card-border); }
+  #resultado a.baixar {
+    display: inline-block; margin-top: 14px; color: #0a0d09; background: var(--accent);
+    text-decoration: none; font-weight: 700; font-size: 13px; padding: 12px 20px; border-radius: 999px;
+  }
+</style>
+</head>
+<body>
+
+<header class="topo">
+  <div class="logo-badge">V</div>
+  <div>
+    <div class="brand">Vira <span>AI</span></div>
+    <div class="sub">Sua transformação começa aqui</div>
+  </div>
+</header>
+
+<div class="passos" id="passos">
+  <div class="passo" data-passo="1"><div class="bolha">1</div><div class="rotulo">Foto</div></div>
+  <div class="passo" data-passo="2"><div class="bolha">2</div><div class="rotulo">Versão</div></div>
+  <div class="passo" data-passo="3"><div class="bolha">3</div><div class="rotulo">Personalize</div></div>
+  <div class="passo" data-passo="4"><div class="bolha">4</div><div class="rotulo">Revise</div></div>
+  <div class="passo" data-passo="5"><div class="bolha">5</div><div class="rotulo">Finalize</div></div>
+</div>
+
+<main>
+
+  <!-- PASSO 1: FOTO -->
+  <section class="tela ativa" id="tela-1">
+    <h1>Primeiro, mande uma foto sua.</h1>
+    <p class="sub">Use uma foto nítida, bem iluminada e com o rosto visível para conseguir um resultado melhor.</p>
+
+    <label class="dropzone" id="dropzone" for="foto">
+      <div class="icone">⬆️</div>
+      <div class="principal" id="dropzone-texto">Arraste sua foto ou toque para selecionar</div>
+      <div class="secundario">JPG, JPEG ou PNG · máximo 10 MB</div>
+      <img id="preview-foto" class="preview-foto" alt="Prévia da foto enviada" />
+      <input type="file" id="foto" name="foto" accept="image/*" required />
+    </label>
+
+    <div class="nav-wizard" style="justify-content:flex-end;">
+      <button type="button" class="btn-continuar" id="btn-passo1" disabled>Continuar →</button>
+    </div>
+  </section>
+
+  <!-- PASSO 2: VERSÃO -->
+  <section class="tela" id="tela-2">
+    <h1>Qual versão sua você quer mostrar?</h1>
+    <p class="sub">Escolha uma direção. Na próxima etapa, cada detalhe fica do seu jeito.</p>
+
+    <div class="grid-cards" id="grid-categorias">
+      <div class="card-opcao">Carregando opções...</div>
+    </div>
+
+    <div class="nav-wizard">
+      <button type="button" class="btn-voltar" data-voltar="1">← Voltar</button>
+      <button type="button" class="btn-continuar" id="btn-passo2" disabled>Continuar →</button>
+    </div>
+  </section>
+
+  <!-- PASSO 3: PERSONALIZE -->
+  <section class="tela" id="tela-3">
+    <h1>Agora personalize sua transformação.</h1>
+    <p class="sub" id="personalize-sub">Opções pensadas para sua versão escolhida.</p>
+
+    <section class="bloco">
+      <label class="titulo">Cabelo</label>
+      <div class="grid-cards" id="grid-cabelo"></div>
+    </section>
+
+    <section class="bloco">
+      <label class="titulo">Aparência</label>
+      <div class="grid-cards" id="grid-aparencia"></div>
+    </section>
+
+    <section class="bloco">
+      <label class="titulo">Roupa</label>
+      <div class="grid-cards" id="grid-roupa"></div>
+    </section>
+
+    <section class="bloco">
+      <label class="titulo">Cenário</label>
+      <div class="grid-cards" id="grid-cenario"></div>
+    </section>
+
+    <section class="bloco">
+      <label class="titulo">Pose</label>
+      <div class="grid-cards" id="grid-pose"></div>
+    </section>
+
+    <section class="bloco">
+      <label class="titulo">Acessórios</label>
+      <div class="grid-cards" id="grid-acessorios"></div>
+    </section>
+
+    <section class="bloco" id="bloco-extra" style="display:none;">
+      <span class="tag-secao" id="extra-titulo">Detalhes específicos</span>
+      <div id="extra-campos"></div>
+    </section>
+
+    <section class="bloco">
+      <label class="titulo">Quer algo específico?</label>
+      <textarea
+        id="detalhes"
+        placeholder="Ex.: quero uma foto cinematográfica em um estádio à noite, usando uniforme preto, com iluminação profissional."
+      ></textarea>
+      <p class="aviso">A composição é artística e gerada por inteligência artificial, sem vínculo com marcas, times, empresas ou pessoas reais.</p>
+    </section>
+
+    <div class="nav-wizard">
+      <button type="button" class="btn-voltar" data-voltar="2">← Voltar</button>
+      <button type="button" class="btn-continuar" id="btn-passo3">Continuar →</button>
+    </div>
+  </section>
+
+  <!-- PASSO 4: REVISE -->
+  <section class="tela" id="tela-4">
+    <h1>Confira sua transformação.</h1>
+    <p class="sub">Tudo certo? Você pode editar qualquer escolha antes de seguir.</p>
+
+    <img id="preview-foto-revisao" class="preview-foto" style="max-width:100%; display:block; margin-bottom:16px;" alt="Sua foto" />
+
+    <div id="resumo-lista"></div>
+
+    <div class="nav-wizard">
+      <button type="button" class="btn-voltar" data-voltar="3">← Voltar</button>
+      <button type="button" class="btn-continuar" id="btn-passo4">Continuar →</button>
+    </div>
+  </section>
+
+  <!-- PASSO 5: FINALIZE -->
+  <section class="tela" id="tela-5">
+    <h1>Sua transformação está pronta para gerar.</h1>
+
+    <ul class="checklist">
+      <li><span class="v">✓</span> Imagem personalizada com IA</li>
+      <li><span class="v">✓</span> Alta qualidade</li>
+      <li><span class="v">✓</span> Estilo, cenário e pose escolhidos</li>
+      <li><span class="v">✓</span> Acessórios personalizados</li>
+    </ul>
+
+    <div class="box-final">
+      <div class="titulo-box">
+        <span>Transformação completa</span>
+        <span class="selo">Geração segura</span>
+      </div>
+      <button type="button" class="btn-continuar full" id="btn-gerar">Criar minha foto agora →</button>
+    </div>
+
+    <div class="nav-wizard" style="justify-content:flex-start; margin-top: 18px;">
+      <button type="button" class="btn-voltar" data-voltar="4">← Voltar</button>
+    </div>
+
+    <div id="status"></div>
+    <div id="erro"></div>
+    <div id="resultado"></div>
+  </section>
+
+</main>
+
+<script>
+  // ---------------------------------------------------------------------
+  // Estado do wizard
+  // ---------------------------------------------------------------------
+  const estado = {
+    passoAtual: 1,
+    arquivoFoto: null,
+    categoria: null,
+    cabelo: "Meu cabelo atual",
+    aparencia: "Original",
+    roupa: null,
+    cenario: null,
+    pose: null,
+    acessorios: "Nenhum",
+    extra: {},
+  };
+
+  let config = null; // vem de /api/config
+
+  const elPassos = document.querySelectorAll(".passo");
+  const elTelas = document.querySelectorAll(".tela");
+
+  function irParaPasso(n) {
+    estado.passoAtual = n;
+    elTelas.forEach((t) => t.classList.remove("ativa"));
+    document.getElementById(`tela-${n}`).classList.add("ativa");
+
+    elPassos.forEach((p) => {
+      const num = Number(p.dataset.passo);
+      p.classList.toggle("ativo", num === n);
+      p.classList.toggle("feito", num < n);
+      p.querySelector(".bolha").textContent = num < n ? "✓" : num;
+    });
+
+    if (n === 4) montarResumo();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  document.querySelectorAll("[data-voltar]").forEach((btn) => {
+    btn.addEventListener("click", () => irParaPasso(Number(btn.dataset.voltar)));
+  });
+
+  // ---------------------------------------------------------------------
+  // Passo 1: foto
+  // ---------------------------------------------------------------------
+  const inputFoto = document.getElementById("foto");
+  const dropzone = document.getElementById("dropzone");
+  const dropzoneTexto = document.getElementById("dropzone-texto");
+  const previewFoto = document.getElementById("preview-foto");
+  const btnPasso1 = document.getElementById("btn-passo1");
+
+  inputFoto.addEventListener("change", () => {
+    const arquivo = inputFoto.files[0];
+    if (!arquivo) return;
+    estado.arquivoFoto = arquivo;
+    dropzone.classList.add("tem-arquivo");
+    dropzoneTexto.textContent = arquivo.name;
+    const leitor = new FileReader();
+    leitor.onload = (e) => {
+      previewFoto.src = e.target.result;
+      previewFoto.style.display = "inline-block";
+    };
+    leitor.readAsDataURL(arquivo);
+    btnPasso1.disabled = false;
+  });
+
+  btnPasso1.addEventListener("click", () => irParaPasso(2));
+
+  // ---------------------------------------------------------------------
+  // Passo 2: categoria ("versão")
+  // ---------------------------------------------------------------------
+  const gridCategorias = document.getElementById("grid-categorias");
+  const btnPasso2 = document.getElementById("btn-passo2");
+
+  function montarCards(container, opcoes, valorAtual, aoSelecionar, comEmoji) {
+    container.innerHTML = opcoes
+      .map((op) => {
+        const label = comEmoji ? op.label : op;
+        const valor = comEmoji ? op.chave : op;
+        const emoji = comEmoji ? `<span class="emoji">${op.emoji}</span>` : "";
+        const selecionada = valor === valorAtual ? "selecionada" : "";
+        return `<div class="card-opcao ${selecionada}" data-valor="${valor}">${emoji}<span>${label}</span><span class="check">✓</span></div>`;
+      })
+      .join("");
+
+    container.querySelectorAll(".card-opcao").forEach((card) => {
+      card.addEventListener("click", () => {
+        container.querySelectorAll(".card-opcao").forEach((c) => c.classList.remove("selecionada"));
+        card.classList.add("selecionada");
+        aoSelecionar(card.dataset.valor);
+      });
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Passo 3: personalize
+  // ---------------------------------------------------------------------
+  const gridCabelo = document.getElementById("grid-cabelo");
+  const gridAparencia = document.getElementById("grid-aparencia");
+  const gridRoupa = document.getElementById("grid-roupa");
+  const gridCenario = document.getElementById("grid-cenario");
+  const gridPose = document.getElementById("grid-pose");
+  const gridAcessorios = document.getElementById("grid-acessorios");
+  const blocoExtra = document.getElementById("bloco-extra");
+  const extraTitulo = document.getElementById("extra-titulo");
+  const extraCampos = document.getElementById("extra-campos");
+  const personalizeSub = document.getElementById("personalize-sub");
+
+  function montarPasso3() {
+    const cat = config.categorias.find((c) => c.chave === estado.categoria);
+    personalizeSub.textContent = `Opções pensadas para sua versão de ${cat.label.toLowerCase()}.`;
+
+    montarCards(gridCabelo, config.cabelo, estado.cabelo, (v) => (estado.cabelo = v), false);
+    montarCards(gridAparencia, config.aparencia, estado.aparencia, (v) => (estado.aparencia = v), false);
+
+    estado.roupa = estado.roupa || cat.roupa[0];
+    estado.cenario = estado.cenario || cat.cenario[0];
+    estado.pose = estado.pose || cat.pose[0];
+    estado.acessorios = estado.acessorios || cat.acessorios[0];
+
+    montarCards(gridRoupa, cat.roupa, estado.roupa, (v) => (estado.roupa = v), false);
+    montarCards(gridCenario, cat.cenario, estado.cenario, (v) => (estado.cenario = v), false);
+    montarCards(gridPose, cat.pose, estado.pose, (v) => (estado.pose = v), false);
+    montarCards(gridAcessorios, cat.acessorios, estado.acessorios, (v) => (estado.acessorios = v), false);
+
+    if (cat.extra && cat.extra.campos && cat.extra.campos.length) {
+      blocoExtra.style.display = "block";
+      extraTitulo.textContent = cat.extra.titulo;
+      extraCampos.innerHTML = "";
+      cat.extra.campos.forEach((campo) => {
+        const tituloCampo = document.createElement("label");
+        tituloCampo.className = "titulo";
+        tituloCampo.style.marginTop = "14px";
+        tituloCampo.textContent = campo.label;
+        const grid = document.createElement("div");
+        grid.className = "grid-cards";
+        extraCampos.appendChild(tituloCampo);
+        extraCampos.appendChild(grid);
+
+        estado.extra[campo.nome] = estado.extra[campo.nome] || campo.opcoes[campo.opcoes.length - 1];
+        montarCards(grid, campo.opcoes, estado.extra[campo.nome], (v) => (estado.extra[campo.nome] = v), false);
+      });
+    } else {
+      blocoExtra.style.display = "none";
+    }
+  }
+
+  document.getElementById("btn-passo3").addEventListener("click", () => irParaPasso(4));
+
+  // ---------------------------------------------------------------------
+  // Passo 4: revisão
+  // ---------------------------------------------------------------------
+  function montarResumo() {
+    const cat = config.categorias.find((c) => c.chave === estado.categoria);
+    document.getElementById("preview-foto-revisao").src = previewFoto.src;
+    document.getElementById("preview-foto-revisao").style.display = "block";
+
+    const itens = [
+      { rotulo: "Você escolheu", valor: `${cat.emoji} ${cat.label}`, passo: 2 },
+      { rotulo: "Cabelo", valor: estado.cabelo, passo: 3 },
+      { rotulo: "Aparência", valor: estado.aparencia, passo: 3 },
+      { rotulo: "Roupa", valor: estado.roupa, passo: 3 },
+      { rotulo: "Cenário", valor: estado.cenario, passo: 3 },
+      { rotulo: "Pose", valor: estado.pose, passo: 3 },
+      { rotulo: "Acessórios", valor: estado.acessorios, passo: 3 },
+    ];
+
+    if (cat.extra && cat.extra.campos) {
+      cat.extra.campos.forEach((campo) => {
+        itens.push({ rotulo: campo.label, valor: estado.extra[campo.nome], passo: 3 });
+      });
+    }
+
+    const detalhesTexto = document.getElementById("detalhes").value.trim();
+    if (detalhesTexto) {
+      itens.push({ rotulo: "Detalhes extras", valor: detalhesTexto, passo: 3 });
+    }
+
+    document.getElementById("resumo-lista").innerHTML = itens
+      .map(
+        (item) => `
+        <div class="resumo-item">
+          <div>
+            <span class="rotulo">${item.rotulo}</span>
+            <span class="valor">${item.valor}</span>
+          </div>
+          <button type="button" class="editar" data-voltar-resumo="${item.passo}">Editar</button>
+        </div>`
+      )
+      .join("");
+
+    document.querySelectorAll("[data-voltar-resumo]").forEach((btn) => {
+      btn.addEventListener("click", () => irParaPasso(Number(btn.dataset.voltarResumo)));
+    });
+  }
+
+  document.getElementById("btn-passo4").addEventListener("click", () => irParaPasso(5));
+
+  // ---------------------------------------------------------------------
+  // Carrega config do backend e monta o passo 2
+  // ---------------------------------------------------------------------
+  fetch("/api/config")
+    .then((r) => r.json())
+    .then((cfg) => {
+      config = cfg;
+      montarCards(
+        gridCategorias,
+        config.categorias,
+        estado.categoria,
+        (v) => {
+          estado.categoria = v;
+          estado.roupa = null;
+          estado.cenario = null;
+          estado.pose = null;
+          estado.acessorios = null;
+          estado.extra = {};
+          btnPasso2.disabled = false;
+        },
+        true
+      );
+    })
+    .catch(() => {
+      gridCategorias.innerHTML = `<div class="card-opcao">Erro ao carregar opções</div>`;
+    });
+
+  btnPasso2.addEventListener("click", () => {
+    montarPasso3();
+    irParaPasso(3);
+  });
+
+  // ---------------------------------------------------------------------
+  // Passo 5: gerar imagem de verdade
+  // ---------------------------------------------------------------------
+  const btnGerar = document.getElementById("btn-gerar");
+  const status = document.getElementById("status");
+  const erroEl = document.getElementById("erro");
+  const resultado = document.getElementById("resultado");
+
+  btnGerar.addEventListener("click", async () => {
+    erroEl.textContent = "";
+    resultado.innerHTML = "";
+
+    if (!estado.arquivoFoto || !estado.categoria) {
+      erroEl.textContent = "Volte e complete os passos anteriores antes de gerar.";
+      return;
+    }
+
+    btnGerar.disabled = true;
+    status.textContent = "Gerando sua imagem... isso pode levar de 20 a 40 segundos.";
+
+    const dados = new FormData();
+    dados.append("foto", estado.arquivoFoto);
+    dados.append("categoria", estado.categoria);
+    dados.append("cabelo", estado.cabelo);
+    dados.append("aparencia", estado.aparencia);
+    dados.append("roupa", estado.roupa);
+    dados.append("cenario", estado.cenario);
+    dados.append("pose", estado.pose);
+    dados.append("acessorios", estado.acessorios);
+    dados.append("extra", JSON.stringify(estado.extra));
+    dados.append("detalhes", document.getElementById("detalhes").value.trim());
+
+    try {
+      const resp = await fetch("/api/gerar-imagem", { method: "POST", body: dados });
+      const json = await resp.json();
+
+      if (!resp.ok || !json.sucesso) {
+        throw new Error(json.erro || "Erro desconhecido");
+      }
+
+      status.textContent = "Pronto! ✨";
+      resultado.innerHTML = `
+        <img src="data:image/png;base64,${json.imagem_base64}" alt="Imagem gerada" />
+        <br />
+        <a class="baixar" href="data:image/png;base64,${json.imagem_base64}" download="minha-foto-vira-ai.png">Baixar imagem</a>
+      `;
+    } catch (err) {
+      status.textContent = "";
+      erroEl.textContent = err.message;
+    } finally {
+      btnGerar.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
