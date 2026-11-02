@@ -14,6 +14,7 @@
 
 require("dotenv").config();
 
+const crypto = require("crypto");
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
@@ -29,6 +30,35 @@ if (!process.env.OPENAI_API_KEY) {
     "O servidor vai subir mesmo assim, mas gerar imagem vai falhar até a chave ser configurada."
   );
 }
+
+// ---------------------------------------------------------------------------
+// Código de acesso — só quem comprou recebe (área de membros / e-mail da Cakto).
+// Configure na Vercel: Settings > Environment Variables > CODIGO_ACESSO
+// Pode ter mais de um, separado por vírgula (ex: "VIRA2026,PROMO10").
+// Sem CODIGO_ACESSO configurado, a geração fica BLOQUEADA (pra não gastar
+// crédito da OpenAI com quem não pagou).
+// ---------------------------------------------------------------------------
+const CODIGOS_ACESSO = (process.env.CODIGO_ACESSO || "")
+  .split(",")
+  .map((c) => c.trim().toUpperCase())
+  .filter(Boolean);
+
+if (!CODIGOS_ACESSO.length) {
+  console.warn("[AVISO] CODIGO_ACESSO não configurado. A geração de imagens fica bloqueada até configurar.");
+}
+
+function codigoValido(codigo) {
+  if (!codigo || !CODIGOS_ACESSO.length) return false;
+  const recebido = Buffer.from(String(codigo).trim().toUpperCase());
+  return CODIGOS_ACESSO.some((certo) => {
+    const esperado = Buffer.from(certo);
+    return esperado.length === recebido.length && crypto.timingSafeEqual(esperado, recebido);
+  });
+}
+
+// Contato de suporte mostrado no rodapé (e-mail ou WhatsApp com DDD).
+// Configure na Vercel: SUPORTE_CONTATO (ex: "suporte@viraai.com" ou "5571999999999")
+const SUPORTE_CONTATO = (process.env.SUPORTE_CONTATO || "").trim() || null;
 
 // Usa um valor provisório quando a chave não está configurada, só para o
 // cliente da OpenAI não travar a inicialização do servidor. A checagem real
@@ -205,6 +235,22 @@ const CATEGORIAS = {
       ],
     },
   },
+  piloto: {
+    label: "Piloto de Corrida",
+    emoji: "🏎️",
+    prompt:
+      "Transforme a pessoa da foto em um(a) piloto de corrida profissional de monoposto, em cena de autódromo, com macacão de corrida e visual de competição de alto nível.",
+    roupa: ["Macacão de corrida", "Macacão com capacete na mão", "Roupa de equipe (paddock)", "Look personalizado"],
+    cenario: ["Grid de largada", "Box/pit stop", "Pódio com champanhe", "Paddock", "Pista ao pôr do sol"],
+    pose: ["Ao lado do carro", "Dentro do cockpit", "Comemorando no pódio", "Olhando para a câmera", "Pose profissional"],
+    acessorios: ["Nenhum", "Capacete", "Troféu", "Luvas de piloto", "Óculos escuros"],
+    extra: {
+      titulo: "Detalhes da corrida",
+      campos: [
+        { nome: "momento", label: "Momento", opcoes: ["Antes da largada", "Vitória", "Treino livre", "Sem momento específico"] },
+      ],
+    },
+  },
   motociclista: {
     label: "Motociclista",
     emoji: "🏍️",
@@ -240,7 +286,22 @@ app.get("/api/config", (req, res) => {
     extra: c.extra,
   }));
 
-  res.json({ categorias, cabelo: CABELO, aparencia: APARENCIA });
+  res.json({ categorias, cabelo: CABELO, aparencia: APARENCIA, suporte: SUPORTE_CONTATO });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/validar-codigo  { codigo: "..." }  ->  { valido: true/false }
+// O front-end chama isso no passo 1, antes do cliente montar tudo.
+// ---------------------------------------------------------------------------
+app.post("/api/validar-codigo", (req, res) => {
+  if (!CODIGOS_ACESSO.length) {
+    return res.status(503).json({ valido: false, erro: "Acesso ainda não liberado. Fale com o suporte." });
+  }
+  const valido = codigoValido(req.body && req.body.codigo);
+  return res.status(valido ? 200 : 401).json({
+    valido,
+    erro: valido ? undefined : "Código inválido. Confira o código que veio na sua compra.",
+  });
 });
 
 // Mantido por compatibilidade com integrações antigas
@@ -263,6 +324,16 @@ app.post("/api/gerar-imagem", upload.single("foto"), async (req, res) => {
     if (!process.env.OPENAI_API_KEY) {
       return res.status(500).json({
         erro: "O servidor ainda não tem a chave da OpenAI configurada (OPENAI_API_KEY no .env).",
+      });
+    }
+
+    if (!CODIGOS_ACESSO.length) {
+      return res.status(503).json({ erro: "Acesso ainda não liberado. Fale com o suporte." });
+    }
+    if (!codigoValido(req.body.codigo)) {
+      return res.status(401).json({
+        erro: "Código de acesso inválido. Confira o código que veio na sua compra.",
+        codigoInvalido: true,
       });
     }
 
@@ -310,7 +381,8 @@ app.post("/api/gerar-imagem", upload.single("foto"), async (req, res) => {
     }
 
     partes.push(
-      "Mantenha o rosto da pessoa da foto original bem reconhecível e fiel, com realismo fotográfico, sem parecer desenho ou cartoon."
+      "Mantenha o rosto da pessoa da foto original bem reconhecível e fiel, com realismo fotográfico, sem parecer desenho ou cartoon.",
+      "Não use logotipos, escudos, marcas, patrocinadores ou nomes de times, equipes e empresas reais."
     );
 
     const prompt = partes.join(" ");
