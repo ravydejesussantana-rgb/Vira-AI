@@ -166,6 +166,23 @@
 
   #resultado { margin-top: 24px; text-align: center; }
   #resultado img { max-width: 100%; border-radius: 14px; margin-top: 12px; border: 1.5px solid var(--card-border); }
+  /* código de acesso (passo 1) */
+  .campo-texto {
+    width: 100%; padding: 14px; border-radius: 12px;
+    border: 1.5px solid var(--card-border); background: var(--card); color: var(--text);
+    font-size: 15px; font-family: inherit; letter-spacing: 0.5px; text-transform: uppercase;
+  }
+  .campo-texto::placeholder { color: var(--text-dim); text-transform: none; letter-spacing: 0; }
+  .campo-texto:focus { outline: none; border-color: var(--accent); }
+  .campo-texto.ok { border-color: var(--accent); }
+  .campo-texto.erro { border-color: var(--danger); }
+  #codigo-status { min-height: 18px; }
+  #codigo-status.ok { color: var(--accent); }
+  #codigo-status.erro { color: var(--danger); }
+
+  footer.suporte { text-align: center; font-size: 12.5px; color: var(--text-dim); padding: 24px 20px 0; border-top: 1px solid var(--card-border); margin-top: 10px; }
+  footer.suporte a { color: var(--accent); font-weight: 700; text-decoration: none; }
+
   #resultado a.baixar {
     display: inline-block; margin-top: 14px; color: #0a0d09; background: var(--accent);
     text-decoration: none; font-weight: 700; font-size: 13px; padding: 12px 20px; border-radius: 999px;
@@ -196,6 +213,13 @@
   <section class="tela ativa" id="tela-1">
     <h1>Primeiro, mande uma foto sua.</h1>
     <p class="sub">Use uma foto nítida, bem iluminada e com o rosto visível para conseguir um resultado melhor.</p>
+
+    <section class="bloco" id="bloco-codigo">
+      <label class="titulo" for="codigo">Seu código de acesso</label>
+      <input type="text" id="codigo" class="campo-texto" autocomplete="off" autocapitalize="characters" spellcheck="false"
+        placeholder="Está na área de membros da sua compra" />
+      <p class="aviso" id="codigo-status"></p>
+    </section>
 
     <label class="dropzone" id="dropzone" for="foto">
       <div class="icone">⬆️</div>
@@ -325,6 +349,10 @@
 
 </main>
 
+<footer class="suporte" id="rodape-suporte" style="display:none;">
+  Precisa de ajuda? <a id="link-suporte" href="#" target="_blank" rel="noopener"></a>
+</footer>
+
 <script>
   // ---------------------------------------------------------------------
   // Estado do wizard
@@ -376,10 +404,41 @@
   const previewFoto = document.getElementById("preview-foto");
   const btnPasso1 = document.getElementById("btn-passo1");
 
-  inputFoto.addEventListener("change", () => {
+  // A Vercel recusa envios acima de ~4,5 MB, e foto de celular costuma passar
+  // disso. Antes de enviar, reduzimos a foto pra no máximo 1600px (JPEG).
+  // Se o navegador não conseguir ler a imagem, usamos o arquivo original.
+  function comprimirFoto(arquivo) {
+    return new Promise((resolve) => {
+      const url = URL.createObjectURL(arquivo);
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1600;
+        const escala = Math.min(1, MAX / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * escala);
+        canvas.height = Math.round(img.height * escala);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        canvas.toBlob(
+          (blob) => {
+            if (!blob || blob.size >= arquivo.size) return resolve(arquivo);
+            resolve(new File([blob], "foto.jpg", { type: "image/jpeg" }));
+          },
+          "image/jpeg",
+          0.9
+        );
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(arquivo);
+      };
+      img.src = url;
+    });
+  }
+
+  inputFoto.addEventListener("change", async () => {
     const arquivo = inputFoto.files[0];
     if (!arquivo) return;
-    estado.arquivoFoto = arquivo;
     dropzone.classList.add("tem-arquivo");
     dropzoneTexto.textContent = arquivo.name;
     const leitor = new FileReader();
@@ -388,10 +447,77 @@
       previewFoto.style.display = "inline-block";
     };
     leitor.readAsDataURL(arquivo);
+    estado.arquivoFoto = await comprimirFoto(arquivo);
     btnPasso1.disabled = false;
   });
 
-  btnPasso1.addEventListener("click", () => irParaPasso(2));
+  // ---------------------------------------------------------------------
+  // Código de acesso: vem no link da compra (?codigo=XXXX) ou o cliente digita.
+  // Fica salvo no navegador pra pessoa não precisar digitar de novo.
+  // ---------------------------------------------------------------------
+  const inputCodigo = document.getElementById("codigo");
+  const codigoStatus = document.getElementById("codigo-status");
+  let codigoLiberado = false;
+
+  function lerCodigoSalvo() {
+    try { return localStorage.getItem("viraai_codigo") || ""; } catch (e) { return ""; }
+  }
+  function salvarCodigo(c) {
+    try { localStorage.setItem("viraai_codigo", c); } catch (e) {}
+  }
+
+  function mostrarStatusCodigo(tipo, texto) {
+    codigoStatus.className = "aviso " + (tipo || "");
+    codigoStatus.textContent = texto || "";
+    inputCodigo.classList.toggle("ok", tipo === "ok");
+    inputCodigo.classList.toggle("erro", tipo === "erro");
+  }
+
+  async function validarCodigo() {
+    const codigo = inputCodigo.value.trim();
+    if (!codigo) {
+      mostrarStatusCodigo("erro", "Digite o código de acesso que veio na sua compra.");
+      return false;
+    }
+    mostrarStatusCodigo("", "Verificando código...");
+    try {
+      const resp = await fetch("/api/validar-codigo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ codigo }),
+      });
+      const json = await resp.json();
+      codigoLiberado = !!json.valido;
+      if (codigoLiberado) {
+        salvarCodigo(codigo);
+        mostrarStatusCodigo("ok", "✓ Acesso liberado");
+      } else {
+        mostrarStatusCodigo("erro", json.erro || "Código inválido.");
+      }
+    } catch (e) {
+      codigoLiberado = false;
+      mostrarStatusCodigo("erro", "Não deu pra verificar agora. Confira sua internet e tente de novo.");
+    }
+    return codigoLiberado;
+  }
+
+  inputCodigo.addEventListener("input", () => {
+    codigoLiberado = false;
+    mostrarStatusCodigo("", "");
+  });
+  inputCodigo.addEventListener("change", validarCodigo);
+
+  const codigoDaUrl = new URLSearchParams(location.search).get("codigo");
+  inputCodigo.value = (codigoDaUrl || lerCodigoSalvo()).trim();
+  if (inputCodigo.value) validarCodigo();
+
+  btnPasso1.addEventListener("click", async () => {
+    if (!codigoLiberado && !(await validarCodigo())) {
+      inputCodigo.focus();
+      return;
+    }
+    irParaPasso(2);
+  });
 
   // ---------------------------------------------------------------------
   // Passo 2: categoria ("versão")
@@ -530,6 +656,7 @@
     .then((r) => r.json())
     .then((cfg) => {
       config = cfg;
+      mostrarSuporte(cfg.suporte);
       montarCards(
         gridCategorias,
         config.categorias,
@@ -549,6 +676,22 @@
     .catch(() => {
       gridCategorias.innerHTML = `<div class="card-opcao">Erro ao carregar opções</div>`;
     });
+
+  // Rodapé de suporte: e-mail vira link mailto, número vira link do WhatsApp.
+  function mostrarSuporte(contato) {
+    if (!contato) return;
+    const link = document.getElementById("link-suporte");
+    const soNumeros = contato.replace(/\D/g, "");
+    if (contato.includes("@")) {
+      link.href = "mailto:" + contato;
+    } else if (soNumeros.length >= 10) {
+      link.href = "https://wa.me/" + soNumeros;
+    } else {
+      link.removeAttribute("href");
+    }
+    link.textContent = contato;
+    document.getElementById("rodape-suporte").style.display = "block";
+  }
 
   btnPasso2.addEventListener("click", () => {
     montarPasso3();
@@ -586,13 +729,24 @@
     dados.append("acessorios", estado.acessorios);
     dados.append("extra", JSON.stringify(estado.extra));
     dados.append("detalhes", document.getElementById("detalhes").value.trim());
+    dados.append("codigo", inputCodigo.value.trim());
 
     try {
       const resp = await fetch("/api/gerar-imagem", { method: "POST", body: dados });
-      const json = await resp.json();
+      if (resp.status === 413) {
+        throw new Error("A foto ficou grande demais. Tente outra foto (ou um print da foto).");
+      }
+      const json = await resp.json().catch(() => ({}));
 
+      if (json.codigoInvalido) {
+        status.textContent = "";
+        codigoLiberado = false;
+        irParaPasso(1);
+        mostrarStatusCodigo("erro", json.erro);
+        return;
+      }
       if (!resp.ok || !json.sucesso) {
-        throw new Error(json.erro || "Erro desconhecido");
+        throw new Error(json.erro || "Não deu pra gerar agora. Tente de novo em instantes.");
       }
 
       status.textContent = "Pronto! ✨";
