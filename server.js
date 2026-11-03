@@ -392,8 +392,13 @@ app.post("/api/gerar-imagem", upload.single("foto"), async (req, res) => {
       type: arquivo.mimetype || "image/png",
     });
 
+    // Modelo e qualidade podem ser trocados na Vercel sem mexer no código:
+    //   OPENAI_IMAGE_MODEL   (padrão: gpt-image-2)
+    //   OPENAI_IMAGE_QUALITY (padrão: medium — "low", "medium" ou "high")
+    // O gpt-image-1 foi desligado pela OpenAI em 23/10/2026.
     const resultado = await openai.images.edit({
-      model: "gpt-image-1",
+      model: process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
+      quality: process.env.OPENAI_IMAGE_QUALITY || "medium",
       image: imagemParaEnvio,
       prompt,
       size: "1024x1024",
