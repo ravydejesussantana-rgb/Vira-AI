@@ -56,6 +56,91 @@ function codigoValido(codigo) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Acesso pelo E-MAIL DA COMPRA (recomendado).
+// A Cakto avisa cada venda em /api/cakto-webhook; o app guarda o e-mail do
+// comprador e o saldo de fotos no Upstash Redis (banco grátis da Vercel).
+// Variáveis na Vercel (criadas sozinhas ao conectar o Upstash):
+//   UPSTASH_REDIS_REST_URL e UPSTASH_REDIS_REST_TOKEN
+//   (ou KV_REST_API_URL e KV_REST_API_TOKEN)
+// E uma que você cria: CAKTO_WEBHOOK_SECRET (a "chave secreta" do webhook na Cakto)
+// Sem o banco configurado, o app continua funcionando só com CODIGO_ACESSO.
+// O CODIGO_ACESSO continua valendo como chave do dono, para testes (sem limite).
+// ---------------------------------------------------------------------------
+const REDIS_URL = (process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL || "").replace(/\/$/, "");
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN || "";
+const BANCO_ATIVO = Boolean(REDIS_URL && REDIS_TOKEN);
+const WEBHOOK_SECRET = (process.env.CAKTO_WEBHOOK_SECRET || "").trim();
+
+// Quantas fotos cada plano dá (pelo preço da oferta na Cakto).
+const PLANOS = [
+  { minimo: 45, nome: "Ilimitado", fotos: null }, // null = sem limite
+  { minimo: 25, nome: "Plus", fotos: 20 },
+  { minimo: 15, nome: "Básico", fotos: 10 },
+];
+// Produtos abaixo de R$15 (order bump) com "qualidade" no nome liberam alta qualidade.
+const BUMP_QUALIDADE = /qualidade|premium|hd/i;
+
+if (!BANCO_ATIVO) console.warn("[AVISO] Banco (Upstash Redis) não configurado: acesso só por CODIGO_ACESSO.");
+
+async function redis(...comando) {
+  const r = await fetch(REDIS_URL, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${REDIS_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify(comando),
+  });
+  const json = await r.json().catch(() => ({}));
+  if (!r.ok || json.error) throw new Error(`Redis: ${json.error || r.status}`);
+  return json.result;
+}
+
+function normalizarEmail(email) {
+  const e = String(email || "").trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : "";
+}
+const chaveCliente = (email) => `cliente:${email}`;
+
+async function lerCliente(email) {
+  const lista = await redis("HGETALL", chaveCliente(email));
+  if (!lista || !lista.length) return null;
+  const c = {};
+  for (let i = 0; i < lista.length; i += 2) c[lista[i]] = lista[i + 1];
+  if (c.bloqueado === "1") return null;
+  return {
+    plano: c.plano || "Básico",
+    ilimitado: c.ilimitado === "1",
+    fotos: Number(c.fotos || 0),
+    altaQualidade: c.hq === "1",
+  };
+}
+
+// Tira 1 foto do saldo antes de gerar. Devolve o cliente atualizado ou null se acabou.
+async function reservarFoto(email) {
+  const cliente = await lerCliente(email);
+  if (!cliente) return { ok: false, motivo: "nao_encontrado" };
+  if (cliente.ilimitado) {
+    await redis("HINCRBY", chaveCliente(email), "usadas", 1);
+    return { ok: true, cliente };
+  }
+  const restante = await redis("HINCRBY", chaveCliente(email), "fotos", -1);
+  if (restante < 0) {
+    await redis("HINCRBY", chaveCliente(email), "fotos", 1);
+    return { ok: false, motivo: "sem_saldo", cliente };
+  }
+  await redis("HINCRBY", chaveCliente(email), "usadas", 1);
+  return { ok: true, cliente: { ...cliente, fotos: restante } };
+}
+
+// Se a geração falhar, devolve a foto pro cliente.
+async function devolverFoto(email, cliente) {
+  try {
+    if (!cliente.ilimitado) await redis("HINCRBY", chaveCliente(email), "fotos", 1);
+    await redis("HINCRBY", chaveCliente(email), "usadas", -1);
+  } catch (e) {
+    console.error("Falha ao devolver foto:", e);
+  }
+}
+
 // Contato de suporte mostrado no rodapé (e-mail ou WhatsApp com DDD).
 // Configure na Vercel: SUPORTE_CONTATO (ex: "suporte@viraai.com" ou "5571999999999")
 const SUPORTE_CONTATO = (process.env.SUPORTE_CONTATO || "").trim() || null;
@@ -320,6 +405,90 @@ app.post("/api/validar-codigo", (req, res) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// POST /api/entrar  { email }  ->  { valido, plano, fotos, ilimitado }
+// O cliente entra com o e-mail que usou na compra.
+// ---------------------------------------------------------------------------
+app.post("/api/entrar", async (req, res) => {
+  if (!BANCO_ATIVO) {
+    return res.status(503).json({ valido: false, erro: "Acesso por e-mail ainda não liberado. Use o código da compra." });
+  }
+  const email = normalizarEmail(req.body && req.body.email);
+  if (!email) return res.status(400).json({ valido: false, erro: "Digite um e-mail válido." });
+  try {
+    const cliente = await lerCliente(email);
+    if (!cliente) {
+      return res.status(401).json({
+        valido: false,
+        erro: "Não achamos uma compra com esse e-mail. Use o mesmo e-mail que você colocou no pagamento.",
+      });
+    }
+    return res.json({ valido: true, plano: cliente.plano, fotos: cliente.fotos, ilimitado: cliente.ilimitado });
+  } catch (e) {
+    console.error("Erro ao entrar:", e);
+    return res.status(500).json({ valido: false, erro: "Não deu pra verificar agora. Tente de novo em instantes." });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/cakto-webhook
+// Configure na Cakto: Integrações > Webhooks > URL:
+//   https://SEU-APP.vercel.app/api/cakto-webhook
+// com os eventos "Compra aprovada", "Reembolso" e "Chargeback".
+// ---------------------------------------------------------------------------
+app.post("/api/cakto-webhook", async (req, res) => {
+  if (!BANCO_ATIVO || !WEBHOOK_SECRET) {
+    return res.status(503).json({ ok: false, erro: "Banco ou CAKTO_WEBHOOK_SECRET não configurado." });
+  }
+  const body = req.body || {};
+  const recebido = Buffer.from(String(body.secret || ""));
+  const esperado = Buffer.from(WEBHOOK_SECRET);
+  if (recebido.length !== esperado.length || !crypto.timingSafeEqual(recebido, esperado)) {
+    return res.status(401).json({ ok: false });
+  }
+
+  const evento = String(body.event || "");
+  const d = body.data || {};
+  const email = normalizarEmail(d.customer && d.customer.email);
+  if (!email) return res.json({ ok: true, ignorado: "sem e-mail" });
+  const chave = chaveCliente(email);
+
+  try {
+    if (evento === "purchase_approved") {
+      // Não conta a mesma venda duas vezes (a Cakto pode reenviar o aviso)
+      const idVenda = String(d.id || d.refId || "");
+      if (idVenda) {
+        const nova = await redis("SET", `venda:${idVenda}`, "1", "NX", "EX", 60 * 60 * 24 * 90);
+        if (nova !== "OK") return res.json({ ok: true, repetido: true });
+      }
+
+      const preco = Number((d.offer && d.offer.price) || d.amount || d.baseAmount || 0);
+      const nomes = `${(d.product && d.product.name) || ""} ${(d.offer && d.offer.name) || ""}`;
+
+      if (preco < 15 && BUMP_QUALIDADE.test(nomes)) {
+        await redis("HSET", chave, "hq", "1");
+        return res.json({ ok: true, tipo: "alta_qualidade" });
+      }
+
+      const plano = PLANOS.find((p) => preco >= p.minimo) || PLANOS[PLANOS.length - 1];
+      await redis("HSET", chave, "plano", plano.nome, "bloqueado", "0", "nome", String((d.customer && d.customer.name) || ""));
+      if (plano.fotos === null) await redis("HSET", chave, "ilimitado", "1");
+      else await redis("HINCRBY", chave, "fotos", plano.fotos);
+      return res.json({ ok: true, plano: plano.nome });
+    }
+
+    if (evento === "refund" || evento === "chargeback") {
+      await redis("HSET", chave, "bloqueado", "1");
+      return res.json({ ok: true, bloqueado: true });
+    }
+
+    return res.json({ ok: true, ignorado: evento });
+  } catch (e) {
+    console.error("Erro no webhook da Cakto:", e);
+    return res.status(500).json({ ok: false });
+  }
+});
+
 // Mantido por compatibilidade com integrações antigas
 app.get("/api/categorias", (req, res) => {
   const lista = Object.entries(CATEGORIAS).map(([chave, v]) => ({ chave, label: v.label }));
@@ -336,6 +505,8 @@ app.get("/api/categorias", (req, res) => {
 //   detalhes    (texto livre opcional)
 // ---------------------------------------------------------------------------
 app.post("/api/gerar-imagem", upload.single("foto"), async (req, res) => {
+  let reserva = null; // foto descontada do saldo do cliente (devolvida se der erro)
+  let emailReservado = "";
   try {
     if (!process.env.OPENAI_API_KEY) {
       return res.status(500).json({
@@ -343,12 +514,15 @@ app.post("/api/gerar-imagem", upload.single("foto"), async (req, res) => {
       });
     }
 
-    if (!CODIGOS_ACESSO.length) {
-      return res.status(503).json({ erro: "Acesso ainda não liberado. Fale com o suporte." });
-    }
-    if (!codigoValido(req.body.codigo)) {
+    // Quem pode gerar: o dono (CODIGO_ACESSO, sem limite) ou um comprador
+    // (e-mail da compra, com saldo de fotos).
+    const ehDono = codigoValido(req.body.codigo);
+    const emailCliente = !ehDono && BANCO_ATIVO ? normalizarEmail(req.body.email) : "";
+    if (!ehDono && !emailCliente) {
       return res.status(401).json({
-        erro: "Código de acesso inválido. Confira o código que veio na sua compra.",
+        erro: BANCO_ATIVO
+          ? "Digite o e-mail que você usou na compra."
+          : "Código de acesso inválido. Confira o código que veio na sua compra.",
         codigoInvalido: true,
       });
     }
@@ -412,9 +586,27 @@ app.post("/api/gerar-imagem", upload.single("foto"), async (req, res) => {
     //   OPENAI_IMAGE_MODEL   (padrão: gpt-image-2)
     //   OPENAI_IMAGE_QUALITY (padrão: medium — "low", "medium" ou "high")
     // O gpt-image-1 foi desligado pela OpenAI em 23/10/2026.
+    // Desconta 1 foto do saldo do comprador antes de chamar a OpenAI
+    if (emailCliente) {
+      reserva = await reservarFoto(emailCliente);
+      if (!reserva.ok) {
+        const semSaldo = reserva.motivo === "sem_saldo";
+        reserva = null;
+        return res.status(semSaldo ? 402 : 401).json({
+          erro: semSaldo
+            ? "Suas fotos acabaram. Para criar mais, escolha um novo plano."
+            : "Não achamos uma compra com esse e-mail. Use o mesmo e-mail do pagamento.",
+          semSaldo,
+          codigoInvalido: !semSaldo,
+        });
+      }
+      emailReservado = emailCliente;
+    }
+    const altaQualidade = Boolean(reserva && reserva.cliente.altaQualidade);
+
     const resultado = await openai.images.edit({
       model: process.env.OPENAI_IMAGE_MODEL || "gpt-image-2",
-      quality: process.env.OPENAI_IMAGE_QUALITY || "medium",
+      quality: altaQualidade ? "high" : process.env.OPENAI_IMAGE_QUALITY || "medium",
       image: imagemParaEnvio,
       prompt,
       size: "1024x1024",
@@ -422,14 +614,21 @@ app.post("/api/gerar-imagem", upload.single("foto"), async (req, res) => {
 
     const b64 = resultado.data[0].b64_json;
 
+    const saldo = reserva
+      ? { ilimitado: reserva.cliente.ilimitado, fotos: reserva.cliente.fotos }
+      : null;
+    reserva = null; // deu certo: a foto fica descontada
+
     return res.json({
       sucesso: true,
+      saldo,
       categoria,
       prompt_usado: prompt,
       imagem_base64: b64, // front-end usa como: `data:image/png;base64,${imagem_base64}`
     });
   } catch (err) {
     console.error("Erro ao gerar imagem:", err);
+    if (reserva && emailReservado) await devolverFoto(emailReservado, reserva.cliente);
     return res.status(500).json({
       erro: "Falha ao gerar a imagem. Tente novamente em instantes.",
       detalhe: process.env.NODE_ENV === "development" ? String(err.message || err) : undefined,
