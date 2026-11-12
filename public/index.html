@@ -215,9 +215,9 @@
     <p class="sub">Use uma foto nítida, bem iluminada e com o rosto visível para conseguir um resultado melhor.</p>
 
     <section class="bloco" id="bloco-codigo">
-      <label class="titulo" for="codigo">Seu código de acesso</label>
-      <input type="text" id="codigo" class="campo-texto" autocomplete="off" autocapitalize="characters" spellcheck="false"
-        placeholder="Está na área de membros da sua compra" />
+      <label class="titulo" for="codigo">E-mail da sua compra</label>
+      <input type="text" id="codigo" class="campo-texto" autocomplete="email" inputmode="email" autocapitalize="off" spellcheck="false"
+        placeholder="O mesmo e-mail que você usou no pagamento" />
       <p class="aviso" id="codigo-status"></p>
     </section>
 
@@ -473,24 +473,39 @@
     inputCodigo.classList.toggle("erro", tipo === "erro");
   }
 
+  // O campo aceita o e-mail da compra (clientes) ou o código de acesso (dono/testes).
+  const ehEmail = (v) => v.includes("@");
+
+  function textoSaldo(json) {
+    if (json.ilimitado) return `✓ Acesso liberado · Plano ${json.plano || "Ilimitado"}: fotos ilimitadas`;
+    if (typeof json.fotos === "number") {
+      return json.fotos > 0
+        ? `✓ Acesso liberado · Você tem ${json.fotos} foto${json.fotos === 1 ? "" : "s"}`
+        : "Suas fotos acabaram. Para criar mais, escolha um novo plano.";
+    }
+    return "✓ Acesso liberado";
+  }
+
   async function validarCodigo() {
     const codigo = inputCodigo.value.trim();
     if (!codigo) {
-      mostrarStatusCodigo("erro", "Digite o código de acesso que veio na sua compra.");
+      mostrarStatusCodigo("erro", "Digite o e-mail que você usou na compra.");
       return false;
     }
-    mostrarStatusCodigo("", "Verificando código...");
+    mostrarStatusCodigo("", "Verificando...");
     try {
-      const resp = await fetch("/api/validar-codigo", {
+      const resp = await fetch(ehEmail(codigo) ? "/api/entrar" : "/api/validar-codigo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ codigo }),
+        body: JSON.stringify(ehEmail(codigo) ? { email: codigo } : { codigo }),
       });
       const json = await resp.json();
-      codigoLiberado = !!json.valido;
+      codigoLiberado = !!json.valido && !(typeof json.fotos === "number" && !json.ilimitado && json.fotos <= 0);
       if (codigoLiberado) {
         salvarCodigo(codigo);
-        mostrarStatusCodigo("ok", "✓ Acesso liberado");
+        mostrarStatusCodigo("ok", textoSaldo(json));
+      } else if (json.valido) {
+        mostrarStatusCodigo("erro", textoSaldo(json));
       } else {
         mostrarStatusCodigo("erro", json.erro || "Código inválido.");
       }
@@ -729,7 +744,8 @@
     dados.append("acessorios", estado.acessorios);
     dados.append("extra", JSON.stringify(estado.extra));
     dados.append("detalhes", document.getElementById("detalhes").value.trim());
-    dados.append("codigo", inputCodigo.value.trim());
+    const acesso = inputCodigo.value.trim();
+    dados.append(ehEmail(acesso) ? "email" : "codigo", acesso);
 
     try {
       const resp = await fetch("/api/gerar-imagem", { method: "POST", body: dados });
@@ -738,6 +754,11 @@
       }
       const json = await resp.json().catch(() => ({}));
 
+      if (json.semSaldo) {
+        status.textContent = "";
+        erroEl.textContent = json.erro;
+        return;
+      }
       if (json.codigoInvalido) {
         status.textContent = "";
         codigoLiberado = false;
@@ -750,6 +771,7 @@
       }
 
       status.textContent = "Pronto! ✨";
+      if (json.saldo) mostrarStatusCodigo("ok", textoSaldo(json.saldo));
       resultado.innerHTML = `
         <img src="data:image/png;base64,${json.imagem_base64}" alt="Imagem gerada" />
         <br />
