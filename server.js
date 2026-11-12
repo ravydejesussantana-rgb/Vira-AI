@@ -370,6 +370,12 @@ const CATEGORIAS = {
   },
 };
 
+// Opção de fundo preto liso (retrato de estúdio) em todas as categorias.
+const FUNDO_PRETO = "Fundo preto (estúdio)";
+for (const c of Object.values(CATEGORIAS)) {
+  if (!c.cenario.includes(FUNDO_PRETO)) c.cenario.unshift(FUNDO_PRETO);
+}
+
 // ---------------------------------------------------------------------------
 // GET /api/config
 // Devolve tudo que o front-end precisa para montar o wizard: categorias +
@@ -552,7 +558,11 @@ app.post("/api/gerar-imagem", upload.single("foto"), async (req, res) => {
     if (cabelo && cabelo !== "Meu cabelo atual") partes.push(`Cabelo: ${cabelo}.`);
     if (aparencia && aparencia !== "Original") partes.push(`Aparência: ${aparencia}.`);
     if (roupa) partes.push(`Roupa: ${roupa}.`);
-    if (cenario) partes.push(`Cenário: ${cenario}.`);
+    if (cenario === FUNDO_PRETO) {
+      partes.push(
+        "Cenário: fundo preto liso de estúdio fotográfico, sem objetos, com iluminação profissional suave destacando o rosto e a roupa, estilo retrato de ensaio profissional."
+      );
+    } else if (cenario) partes.push(`Cenário: ${cenario}.`);
     if (pose) partes.push(`Pose: ${pose}.`);
     if (acessorios && acessorios !== "Nenhum") partes.push(`Acessórios: ${acessorios}.`);
 
