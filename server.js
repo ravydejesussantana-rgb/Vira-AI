@@ -235,6 +235,22 @@ const CATEGORIAS = {
       ],
     },
   },
+  corretor: {
+    label: "Corretor de Imóveis",
+    emoji: "🏠",
+    prompt:
+      "Transforme a pessoa da foto em um(a) corretor(a) de imóveis profissional, em retrato de alto padrão que transmita confiança e credibilidade, como foto de perfil para redes sociais e anúncios de imóveis.",
+    roupa: ["Terno", "Blazer", "Camisa social", "Social sem gravata", "Casual premium"],
+    cenario: ["Imóvel de alto padrão", "Sala de estar decorada", "Fachada de casa moderna", "Escritório imobiliário", "Varanda com vista"],
+    pose: ["Olhando para a câmera", "Em pé", "Braços cruzados", "Segurando chaves", "Pose profissional"],
+    acessorios: ["Nenhum", "Óculos", "Relógio", "Chaves", "Tablet"],
+    extra: {
+      titulo: "Detalhes do imóvel",
+      campos: [
+        { nome: "tipoImovel", label: "Tipo de imóvel", opcoes: ["Apartamento", "Casa", "Cobertura", "Sem tipo específico"] },
+      ],
+    },
+  },
   piloto: {
     label: "Piloto de Corrida",
     emoji: "🏎️",
