@@ -162,6 +162,10 @@
   .box-final .selo { border: 1px solid var(--accent); color: var(--accent); font-size: 10px; font-weight: 700; padding: 4px 10px; border-radius: 999px; text-transform: uppercase; }
 
   #status { margin-top: 16px; font-size: 13px; color: var(--text-dim); text-align: center; }
+  .gerando { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 8px 0; }
+  .spinner { width: 46px; height: 46px; border-radius: 50%; border: 4px solid rgba(255,255,255,0.12); border-top-color: var(--accent); animation: girar 0.9s linear infinite; }
+  @keyframes girar { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.5s; } }
   #erro { color: var(--danger); font-size: 13px; margin-top: 10px; text-align: center; }
 
   #resultado { margin-top: 24px; text-align: center; }
@@ -731,7 +735,7 @@
     }
 
     btnGerar.disabled = true;
-    status.textContent = "Gerando sua imagem... isso pode levar de 20 a 40 segundos.";
+    status.innerHTML = '<div class="gerando" role="status" aria-live="polite"><div class="spinner" aria-hidden="true"></div><span>Gerando sua imagem... isso pode levar de 20 a 40 segundos.</span></div>';
 
     const dados = new FormData();
     dados.append("foto", estado.arquivoFoto);
