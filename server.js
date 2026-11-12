@@ -456,7 +456,12 @@ app.post("/api/cakto-webhook", async (req, res) => {
   try {
     if (evento === "purchase_approved") {
       // Não conta a mesma venda duas vezes (a Cakto pode reenviar o aviso)
-      const idVenda = String(d.id || d.refId || "");
+      // A venda principal e o order bump podem chegar com o mesmo id de pedido,
+      // então a chave inclui o produto e a oferta.
+      const idPedido = String(d.id || d.refId || "");
+      const idVenda = idPedido
+        ? `${idPedido}:${(d.product && d.product.id) || ""}:${(d.offer && d.offer.id) || ""}`
+        : "";
       if (idVenda) {
         const nova = await redis("SET", `venda:${idVenda}`, "1", "NX", "EX", 60 * 60 * 24 * 90);
         if (nova !== "OK") return res.json({ ok: true, repetido: true });
